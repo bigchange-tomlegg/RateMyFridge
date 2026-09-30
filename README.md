@@ -1,10 +1,77 @@
 # Rate My Fridge API
 
-A tiny shared backend for the iOS vs Android 30-minute mobile challenge.
+A tiny shared backend for the iOS vs Android Rate My Fridge mini hack. Teams send a photo of a fridge, and the API uses an OpenAI vision model to send back a score, a funny verdict, the items it spotted, some advice and the fridge's "vibe".
 
-## 1. Install
+**Live:** https://ratemyfridge.onrender.com
 
-Python 3.11+ recommended.
+| Page | What it is |
+| --- | --- |
+| [`/mini-hack`](https://ratemyfridge.onrender.com/mini-hack) | The challenge brief for the teams (rendered from [`exercise.md`](exercise.md)) |
+| [`/docs`](https://ratemyfridge.onrender.com/docs) | Interactive API docs. Use **Try it out** to upload a photo from your browser |
+| [`/redoc`](https://ratemyfridge.onrender.com/redoc) | Read-only API reference |
+| [`/openapi.json`](https://ratemyfridge.onrender.com/openapi.json) | OpenAPI spec, for Postman or client code generation |
+
+## API contract
+
+This is all the mobile teams need.
+
+### `POST /rate-fridge`
+
+Send the photo as `multipart/form-data` with one field:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `image` | file | JPEG, PNG or WebP, max 10 MB |
+
+```bash
+curl -X POST https://ratemyfridge.onrender.com/rate-fridge \
+  -F "image=@$HOME/Downloads/fridge.jpg"
+```
+
+The field must be called `image`, and the path needs the `@` in front of it so curl sends the file itself. Opening this URL in a browser sends a GET request and returns `405 Method Not Allowed`; that's expected.
+
+#### Response `200`
+
+```json
+{
+  "score": 37,
+  "verdict": "Your fridge needs professional help.",
+  "items": ["half a cucumber", "three sauces", "mysterious container"],
+  "advice": "Buy actual food before opening another condiment.",
+  "vibe": "chaos"
+}
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `score` | integer | 0–100. 90+ impressively stocked, 70–89 solid, 50–69 questionable, 30–49 concerning, under 30 emergency |
+| `verdict` | string | One short, funny sentence |
+| `items` | string[] | Up to 6 visible food or drink items |
+| `advice` | string | One short, funny sentence |
+| `vibe` | string | One of `student`, `bachelor`, `meal-prepper`, `foodie`, `chaos`, `surprisingly-organised`, `family-fridge`, `mystery` |
+
+The text is written by the model and changes on every request, so build the UI around the fields, not exact strings. Requests usually take 3–8 seconds, so show a loading state.
+
+#### Errors
+
+Errors come back as `{"detail": "..."}`.
+
+| Status | Meaning |
+| --- | --- |
+| `413` | Image is larger than 10 MB |
+| `415` | Not a JPEG, PNG or WebP (iPhone HEIC photos need converting first) |
+| `422` | No `image` field in the request |
+| `502` | The AI analysis failed. Safe to retry |
+
+### `GET /health`
+
+Returns `{"status": "ok"}`. Useful for waking the server up before a demo.
+
+## Run it locally
+
+You need Python 3.12 (see [`.python-version`](.python-version)). On macOS the system `python3` is too old; install one with `brew install python@3.12`.
+
+**1. Install** (first time only)
 
 ```bash
 python3 -m venv .venv
@@ -20,80 +87,52 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## 2. Configure
+**2. Configure** (first time only)
 
-Copy `.env.example` to `.env` and set `OPENAI_API_KEY`.
+Copy `.env.example` to `.env` and set `OPENAI_API_KEY`. `OPENAI_MODEL` defaults to `gpt-6-luna`. `.env` is git-ignored; never commit it.
 
-For local development, export it in your shell (or use your preferred `.env` loader).
-
-## 3. Run
+**3. Run**
 
 ```bash
+source .venv/bin/activate
 uvicorn app.main:app --reload --env-file .env --host 0.0.0.0 --port 8000
 ```
 
-Health check:
+Then open http://localhost:8000/docs, or test with curl:
 
 ```bash
 curl http://localhost:8000/health
-```
-
-## 4. Test the fridge endpoint
-
-```bash
 curl -X POST http://localhost:8000/rate-fridge \
   -F "image=@/path/to/fridge.jpg"
 ```
 
-## Mobile contract
+To test from a phone on the same Wi-Fi, use your Mac's IP address (`ipconfig getifaddr en0`) instead of `localhost`.
 
-### Request
+## Deploy to Render
 
-`POST /rate-fridge`
+The app runs on Render's free tier and redeploys automatically on every push to `main`.
 
-Content-Type: `multipart/form-data`
+### New service
 
-Field:
-- `image`: JPEG, PNG, or WebP, max 10 MB
+**Option A: Blueprint (recommended).** In Render, choose **New → Blueprint** and pick this repo. Render reads [`render.yaml`](render.yaml), which sets the build command, start command, health check and `OPENAI_MODEL`. Paste your OpenAI key when it asks for `OPENAI_API_KEY`.
 
-### Response
+**Option B: Web Service.** Choose **New → Web Service**, pick this repo and set:
 
-```json
-{
-  "score": 37,
-  "verdict": "Your fridge needs professional help.",
-  "items": [
-    "half a cucumber",
-    "three sauces",
-    "mysterious container"
-  ],
-  "advice": "Buy actual food before opening another condiment."
-  "vibe": "chaos"
-}
-```
+| Setting | Value |
+| --- | --- |
+| Runtime | Python |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/health` |
+| Environment | `OPENAI_API_KEY` = your key, `OPENAI_MODEL` = `gpt-6-luna` |
 
-The exact response is generated by the model, so don't build the UI around exact strings.
+Don't use the local start command on Render. `--env-file .env` fails because `.env` isn't in the repo, and Render supplies the port through `$PORT`.
 
-## Challenge suggestion
+### Things to know
 
-Give both teams only this contract. They should build:
-
-Camera -> upload -> loading state -> result card
-
-Do not give them your OpenAI API key. The mobile apps only need the API URL.
-
-## Deploying
-
-This is a standard FastAPI app and can be deployed to any service that supports a Python web process.
-
-Start command:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-
-Set `OPENAI_API_KEY` in the deployment platform's secret/environment settings.
+- **Cold starts:** the free tier sleeps after about 15 minutes without traffic, and the first request after that can take up to a minute. Hit `/health` just before the teams start.
+- **Changing the brief:** edit `exercise.md` and push; `/mini-hack` updates on the next deploy.
 
 ## Security
 
-For the team challenge, keep the API private or add authentication/rate limiting before exposing it publicly. Never put `OPENAI_API_KEY` in either mobile app.
+The API has no authentication or rate limiting

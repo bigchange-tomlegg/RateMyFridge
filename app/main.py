@@ -7,9 +7,20 @@ import markdown
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
-app = FastAPI(title="Rate My Fridge API", version="1.0.0")
+app = FastAPI(
+    title="Rate My Fridge API",
+    version="1.0.0",
+    description=(
+        "Upload a photo of the inside of a fridge and get back a score, a funny verdict, "
+        "the items spotted, some advice and the fridge's vibe.\n\n"
+        "Send the photo to `POST /rate-fridge` as `multipart/form-data` with a single field "
+        "called `image` (JPEG, PNG or WebP, max 10 MB). Responses usually take 3-8 seconds.\n\n"
+        "The text is written by an AI model, so it changes every time. Build your UI around "
+        "the fields, not exact strings."
+    ),
+)
 
 MAX_BYTES = 10 * 1024 * 1024
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -72,12 +83,32 @@ Do not mention sensitive personal attributes.
 """.strip()
 
 
+VIBES = [
+    "student", "bachelor", "meal-prepper", "foodie",
+    "chaos", "surprisingly-organised", "family-fridge", "mystery",
+]
+
+
 class FridgeResult(BaseModel):
-    score: int
-    verdict: str
-    items: list[str]
-    advice: str
-    vibe: str
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "score": 37,
+            "verdict": "Your fridge needs professional help.",
+            "items": ["half a cucumber", "three sauces", "mysterious container"],
+            "advice": "Buy actual food before opening another condiment.",
+            "vibe": "chaos",
+        }
+    })
+
+    score: int = Field(description="Fridge score from 0 (emergency) to 100 (impressively stocked).")
+    verdict: str = Field(description="One short, funny sentence summing up the fridge.")
+    items: list[str] = Field(description="Up to 6 food or drink items visible in the photo.")
+    advice: str = Field(description="One short, funny piece of advice.")
+    vibe: str = Field(description="One of: " + ", ".join(VIBES) + ".")
+
+
+class ErrorDetail(BaseModel):
+    detail: str
 
 
 def client() -> OpenAI:
@@ -87,7 +118,7 @@ def client() -> OpenAI:
     return OpenAI(api_key=key)
 
 
-@app.get("/health")
+@app.get("/health", summary="Check the API is up")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
@@ -98,8 +129,19 @@ def mini_hack() -> str:
     return EXERCISE_PAGE.format(body=body)
 
 
-@app.post("/rate-fridge", response_model=FridgeResult)
-async def rate_fridge(image: UploadFile = File(...)) -> Any:
+@app.post(
+    "/rate-fridge",
+    response_model=FridgeResult,
+    summary="Rate a fridge photo",
+    responses={
+        413: {"model": ErrorDetail, "description": "Image is larger than 10 MB."},
+        415: {"model": ErrorDetail, "description": "Image is not a JPEG, PNG or WebP."},
+        502: {"model": ErrorDetail, "description": "The AI analysis failed. Safe to retry."},
+    },
+)
+async def rate_fridge(
+    image: UploadFile = File(..., description="Photo of the inside of a fridge. JPEG, PNG or WebP, max 10 MB."),
+) -> Any:
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(415, "Please upload a JPEG, PNG, or WebP image.")
 
@@ -112,7 +154,7 @@ async def rate_fridge(image: UploadFile = File(...)) -> Any:
 
     try:
         response = client().responses.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            model=os.getenv("OPENAI_MODEL", "gpt-6-luna"),
             input=[{
                 "role": "user",
                 "content": [
@@ -137,10 +179,7 @@ async def rate_fridge(image: UploadFile = File(...)) -> Any:
                             "advice": {"type": "string"},
                             "vibe": {
                                 "type": "string",
-                                "enum": [
-                                    "student", "bachelor", "meal-prepper", "foodie",
-                                    "chaos", "surprisingly-organised", "family-fridge", "mystery"
-                                ],
+                                "enum": VIBES,
                             },
                         },
                         "required": ["score", "verdict", "items", "advice", "vibe"],
