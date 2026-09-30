@@ -1,8 +1,11 @@
 import base64
 import os
+from pathlib import Path
 from typing import Any
 
+import markdown
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -10,6 +13,38 @@ app = FastAPI(title="Rate My Fridge API", version="1.0.0")
 
 MAX_BYTES = 10 * 1024 * 1024
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+EXERCISE_PATH = Path(__file__).resolve().parent.parent / "exercise.md"
+
+EXERCISE_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rate My Fridge Mini Hack</title>
+<style>
+  :root {{ color-scheme: light dark; --fg: #1d1d1f; --bg: #fafaf7; --muted: #6e6e73; --accent: #2e8b57; --quote: #eef5ef; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --fg: #f2f2f2; --bg: #141414; --muted: #a1a1a6; --accent: #5fd08a; --quote: #1f2a22; }}
+  }}
+  body {{ margin: 0; background: var(--bg); color: var(--fg);
+         font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+  main {{ max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }}
+  h1, h2, h3 {{ line-height: 1.25; }}
+  h1 {{ font-size: 2rem; }}
+  h2 {{ margin-top: 2.5rem; }}
+  h3 {{ color: var(--accent); }}
+  blockquote {{ margin: 1rem 0; padding: 0.75rem 1rem; background: var(--quote);
+               border-left: 4px solid var(--accent); border-radius: 6px; }}
+  blockquote p {{ margin: 0.25rem 0; }}
+  hr {{ border: 0; border-top: 1px solid var(--muted); opacity: 0.3; margin: 2.5rem 0; }}
+  code {{ font-size: 0.9em; }}
+</style>
+</head>
+<body><main>
+{body}
+</main></body>
+</html>
+"""
 
 SYSTEM_PROMPT = """
 You are Rate My Fridge, a brutally funny but friendly fridge critic.
@@ -55,6 +90,12 @@ def client() -> OpenAI:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/mini-hack", response_class=HTMLResponse, include_in_schema=False)
+def mini_hack() -> str:
+    body = markdown.markdown(EXERCISE_PATH.read_text(encoding="utf-8"), extensions=["nl2br"])
+    return EXERCISE_PAGE.format(body=body)
 
 
 @app.post("/rate-fridge", response_model=FridgeResult)

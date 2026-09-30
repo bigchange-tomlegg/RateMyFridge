@@ -3,3 +3,4 @@ uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 openai==3.22.1
 pydantic==2.13.5
+markdown==3.11
