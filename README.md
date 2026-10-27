@@ -107,32 +107,3 @@ curl -X POST http://localhost:8000/rate-fridge \
 ```
 
 To test from a phone on the same Wi-Fi, use your Mac's IP address (`ipconfig getifaddr en0`) instead of `localhost`.
-
-## Deploy to Render
-
-The app runs on Render's free tier and redeploys automatically on every push to `main`.
-
-### New service
-
-**Option A: Blueprint (recommended).** In Render, choose **New → Blueprint** and pick this repo. Render reads [`render.yaml`](render.yaml), which sets the build command, start command, health check and `OPENAI_MODEL`. Paste your OpenAI key when it asks for `OPENAI_API_KEY`.
-
-**Option B: Web Service.** Choose **New → Web Service**, pick this repo and set:
-
-| Setting | Value |
-| --- | --- |
-| Runtime | Python |
-| Build command | `pip install -r requirements.txt` |
-| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
-| Health check path | `/health` |
-| Environment | `OPENAI_API_KEY` = your key, `OPENAI_MODEL` = `gpt-6-luna` |
-
-Don't use the local start command on Render. `--env-file .env` fails because `.env` isn't in the repo, and Render supplies the port through `$PORT`.
-
-### Things to know
-
-- **Cold starts:** the free tier sleeps after about 15 minutes without traffic, and the first request after that can take up to a minute. Hit `/health` just before the teams start.
-- **Changing the brief:** edit `exercise.md` and push; `/mini-hack` updates on the next deploy.
-
-## Security
-
-The API has no authentication or rate limiting
